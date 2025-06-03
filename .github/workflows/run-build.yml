@@ -51,41 +51,52 @@ jobs:
           brew update
           brew install mercurial git rust openssl@1.1 wget
 
-      # --- START OF WINDOWS MOZILLABUILD MANUAL SETUP ---
-      - name: Manually Download and Install MozillaBuild for Windows
+      # --- START OF WINDOWS MOZILLABUILD .EXE INSTALLER SETUP ---
+      - name: Download and Install MozillaBuild via .exe for Windows
         if: matrix.os == 'windows-latest'
         shell: pwsh # Use PowerShell for these Windows-specific commands
         run: |
-          Write-Host "Setting up MozillaBuild manually..."
-          $MozBuildDir = "C:\mozilla-build" # Standard installation directory for MozillaBuild
+          Write-Host "Setting up MozillaBuild via .exe installer..."
+          $MozBuildDir = "C:\mozilla-build" # Standard installation directory
           
           if (Test-Path $MozBuildDir) {
-            Write-Host "MozillaBuild directory already exists at $MozBuildDir. Skipping download and extraction."
+            Write-Host "MozillaBuild directory already exists at $MozBuildDir. Assuming it's correctly installed."
           } else {
-            Write-Host "MozillaBuild not found. Downloading MozillaBuild tools..."
-            # This URL points to MozillaBuild 3.4. You might need to update this URL in the future
-            # if a newer version is required by your Arttulcat's Firefox base.
-            # Check https://firefox-source-docs.mozilla.org/setup/windows_build.html for the latest.
-            $MozBuildUrl = "https://github.com/mozilla/mozilla-build/releases/download/3.4/mozilla-build-3.4.zip"
-            $MozBuildZip = Join-Path $env:TEMP "mozilla-build.zip" # Temporary path for the downloaded zip
+            Write-Host "MozillaBuild not found. Downloading MozillaBuildSetup-Latest.exe..."
+            $InstallerUrl = "https://ftp.mozilla.org/pub/mozilla/libraries/win32/MozillaBuildSetup-Latest.exe"
+            $InstallerPath = Join-Path $env:TEMP "MozillaBuildSetup-Latest.exe"
 
-            Write-Host "Downloading from $MozBuildUrl to $MozBuildZip..."
-            Invoke-WebRequest -Uri $MozBuildUrl -OutFile $MozBuildZip -UseBasicParsing
+            Write-Host "Downloading from $InstallerUrl to $InstallerPath..."
+            Invoke-WebRequest -Uri $InstallerUrl -OutFile $InstallerPath -UseBasicParsing
             
-            Write-Host "Extracting MozillaBuild to C:\ (it will create 'mozilla-build' folder)..."
-            # Expand-Archive extracts the contents of the zip. The mozilla-build.zip typically contains
-            # a 'mozilla-build' folder at its root.
-            Expand-Archive -Path $MozBuildZip -DestinationPath "C:\" -Force 
+            Write-Host "Running MozillaBuild installer silently (using /S switch)..."
+            # The /S switch is typically used for silent installation.
+            # Start-Process with -Wait ensures the script waits for the installer to finish.
+            $process = Start-Process -FilePath $InstallerPath -ArgumentList "/S" -Wait -PassThru
             
-            Remove-Item $MozBuildZip -Force
-            Write-Host "MozillaBuild extracted successfully to $MozBuildDir."
+            if ($process.ExitCode -ne 0) {
+                Write-Error "MozillaBuild installer failed with exit code $($process.ExitCode)."
+                # Attempt to clean up downloaded installer
+                if (Test-Path $InstallerPath) { Remove-Item $InstallerPath -Force -ErrorAction SilentlyContinue }
+                exit 1
+            }
+            Write-Host "MozillaBuild installer finished."
+            
+            # Clean up the downloaded installer
+            if (Test-Path $InstallerPath) { Remove-Item $InstallerPath -Force -ErrorAction SilentlyContinue }
+
+            # Verify installation directory
+            if (-not (Test-Path $MozBuildDir)) {
+                Write-Error "MozillaBuild installation directory $MozBuildDir not found after running installer. Installation might have failed silently or installed to a different location."
+                exit 1
+            }
+            Write-Host "MozillaBuild appears to be installed at $MozBuildDir."
           }
           
           # Set the MOZILLABUILD environment variable for the current job.
-          # This is CRITICAL for 'mach' to find the MozillaBuild environment.
           echo "MOZILLABUILD=$MozBuildDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           Write-Host "MOZILLABUILD environment variable set to '$MozBuildDir' for subsequent steps."
-      # --- END OF WINDOWS MOZILLABUILD MANUAL SETUP ---
+      # --- END OF WINDOWS MOZILLABUILD .EXE INSTALLER SETUP ---
 
       - name: Set up Git for Windows (Scoop then Chocolatey)
         if: matrix.os == 'windows-latest'
@@ -147,19 +158,10 @@ jobs:
       - name: Run Arttulcat build script
         shell: bash 
         env:
-          # MOZILLABUILD is set via GITHUB_ENV from the manual setup step for Windows
           MOZILLABUILD: ${{ env.MOZILLABUILD }} 
         run: |
           if [ "$RUNNER_OS" == "Windows" ]; then
             echo "MOZILLABUILD environment variable in bash (Windows): $MOZILLABUILD"
-            # On Windows, mach commands are often run from within the MozillaBuild start shell,
-            # e.g., C:\mozilla-build\start-shell.bat
-            # Your build.sh will execute './mach bootstrap', which should now find MOZILLABUILD
-            # and operate within the context that MOZILLABUILD is available.
-            # If './mach bootstrap' itself needs to be run inside the MSYS shell provided by MozillaBuild,
-            # then build.sh might need to invoke `C:\mozilla-build\start-shell.bat -c "./mach bootstrap && ./mach clobber && ./mach build"`
-            # However, usually, setting MOZILLABUILD and having the tools on PATH (which MozillaBuild's start-shell.bat would do) is enough.
-            # Let's assume for now that ./mach is smart enough if MOZILLABUILD is set.
           fi
           ./build.sh
 
