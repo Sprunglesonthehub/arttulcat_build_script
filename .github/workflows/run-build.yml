@@ -32,14 +32,13 @@ jobs:
           brew install mercurial python@3 node openssl@1.1 rust
           echo "/usr/local/opt/python@3/bin" >> $GITHUB_PATH
 
-      # --- START OF MODIFIED WINDOWS SETUP ---
+      # --- START OF REVISED WINDOWS SETUP ---
       - name: Set up build environment for Windows (Part 1: Git via Scoop/Choco)
         if: matrix.os == 'windows-latest'
-        shell: pwsh # Explicitly use PowerShell Core for clarity
+        shell: pwsh # Explicitly use PowerShell Core
         run: |
-          echo "Installing Git via Scoop if available, else Chocolatey..."
-          $scoopInstalled = Get-Command scoop -ErrorAction SilentlyContinue
-          if ($scoopInstalled) {
+          Write-Host "Installing Git via Scoop if available, else Chocolatey..."
+          if ((Get-Command scoop -ErrorAction SilentlyContinue) -and ($LASTEXITCODE -eq 0)) {
             scoop install git
           } else {
             Write-Host "Scoop not found or failed, falling back to Chocolatey for Git."
@@ -48,9 +47,9 @@ jobs:
 
       - name: Set up build environment for Windows (Part 2: Mercurial and Python)
         if: matrix.os == 'windows-latest'
-        shell: pwsh # Explicitly use PowerShell Core for clarity
+        shell: pwsh # Explicitly use PowerShell Core
         run: |
-          echo "Installing Mercurial and Python 3 via Chocolatey..."
+          Write-Host "Installing Mercurial and Python 3 via Chocolatey..."
           choco install -y mercurial python3
 
       - name: Set up Node.js for Windows
@@ -58,7 +57,7 @@ jobs:
         uses: actions/setup-node@v4 # Use the dedicated setup-node action
         with:
           node-version: '18' # Specify the Node.js version your build requires
-      # --- END OF MODIFIED WINDOWS SETUP ---
+      # --- END OF REVISED WINDOWS SETUP ---
 
       - name: Make build script executable (Linux/macOS)
         if: matrix.os != 'windows-latest'
