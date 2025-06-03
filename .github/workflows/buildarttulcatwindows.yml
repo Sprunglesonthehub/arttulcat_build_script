@@ -46,14 +46,15 @@ jobs:
           # if they are not covered by mingw-w64 or your build system expects them.
 
       - name: Make build script executable
-        run: chmod +x ./build.sh # build.sh is assumed to be in the root of your repo
+        # Ensure buildwindows.sh is executable
+        run: chmod +x ./buildwindows.sh # buildwindows.sh is assumed to be in the root of your repo
 
       - name: Run Arttulcat build script (Windows cross-compilation)
         shell: bash
         run: |
           # IMPORTANT: Building a Windows executable on a Linux machine (cross-compilation)
           # is significantly more complex than native building.
-          # The current build.sh script using './mach package' is designed for
+          # The current buildwindows.sh script using './mach package' is designed for
           # native environments. For cross-compilation:
           # 1. Your .mozconfig will need specific cross-compilation flags (e.g., --target=x86_64-pc-mingw32).
           # 2. You will need a Windows SDK (or equivalent headers/libraries) and a
@@ -61,7 +62,7 @@ jobs:
           # 3. The `mach package` command might need to be adjusted or a custom
           #    packaging script might be required to generate the final .exe or installer.
           # Without these, './mach package' will likely fail when trying to build a Windows artifact.
-          ./build.sh
+          ./buildwindows.sh # Changed to call buildwindows.sh
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
