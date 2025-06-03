@@ -15,7 +15,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-13, windows-latest] # Changed macos-latest to macos-13 for amd64
         # You can add python-version and node-version to the matrix
         # if you need to test against or build with different versions.
         # python-version: ['3.9', '3.10', '3.11']
@@ -29,14 +29,15 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11' # Using a specific, consistent Python version
-          # cache: 'pip' # Removed this line as per the error.
-                         # Re-enable or use cache-dependency-path if you have requirements.txt/pyproject.toml
+          # cache: 'pip' # Removed as project may not have requirements.txt/pyproject.toml at root
+                         # Re-enable or use cache-dependency-path if you have these files.
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '18' # Using a specific, consistent Node.js version
-          cache: 'npm' # Enable caching for npm dependencies
+          # cache: 'npm' # Removed as project may not have package-lock.json etc. at root
+                         # Re-enable or use cache-dependency-path if you have these files.
 
       - name: Set up build environment for Ubuntu
         if: matrix.os == 'ubuntu-latest'
@@ -53,8 +54,8 @@ jobs:
             libxrandr-dev libxtst-dev libxinerama-dev libncursesw5-dev \
             libnotify-dev libasound2-dev libpulse-dev libcairo2-dev libpixman-1-dev yasm
 
-      - name: Set up build environment for macOS
-        if: matrix.os == 'macos-latest'
+      - name: Set up build environment for macOS (amd64)
+        if: matrix.os == 'macos-13'
         run: |
           # Ensure Xcode command line tools are installed (usually needed for Homebrew packages)
           xcode-select --install || true
@@ -163,7 +164,7 @@ jobs:
           prerelease: false
           files: |
             artifacts/arttulcat-build-ubuntu-latest/arttulcat.tar.gz
-            artifacts/arttulcat-build-macos-latest/arttulcat.dmg
+            artifacts/arttulcat-build-macos-13/arttulcat.dmg # Adjusted artifact name
             artifacts/arttulcat-build-ubuntu-latest/arttulcat.deb
             artifacts/arttulcat-build-ubuntu-latest/arttulcat.rpm
             artifacts/arttulcat-build-windows-latest/arttulcat.exe
