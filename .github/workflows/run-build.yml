@@ -17,26 +17,35 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v2
 
-      - name: Set up build environment for ${{ matrix.os }}
-        # Add steps here to install dependencies and tools specific to each OS
-        # This is crucial for a successful Firefox-based browser build
+      - name: Set up build environment for Ubuntu
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential curl git mercurial python3 python3-pip zip unzip npm autoconf2.13 libtool libffi-dev libgdk-pixbuf2.0-dev libgtk-3-dev libdbus-1-dev libevent-dev libglib2.0-dev libssl-dev libx11-dev libxcomposite-dev libxdamage-dev libxext-dev libxfixes-dev libxrandr-dev libxtst-dev libxinerama-dev libncursesw5-dev libnotify-dev libasound2-dev libpulse-dev libcairo2-dev libpixman-1-dev yasm
 
-        # Example for Ubuntu (adjust package names as needed for your build):
-        # if: matrix.os == 'ubuntu-latest'
-        # run: |
-        #   sudo apt-get update
-        #   sudo apt-get install -y <required-packages> build-essential fakeroot rpm
+      - name: Set up build environment for macOS
+        if: matrix.os == 'macos-latest'
+        run: |
+          # Install Xcode Command Line Tools
+          xcode-select --install || true
+          # Install Homebrew if not present
+          /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" || true
+          brew update
+          # Install necessary build tools via Homebrew
+          brew install mercurial python@3 node openssl@1.1 rust
+          # Ensure Python 3 is in PATH for builds that rely on 'python' command
+          echo "/usr/local/opt/python@3/bin" >> $GITHUB_PATH
 
-        # Example for macOS (adjust package names as needed):
-        # if: matrix.os == 'macos-latest'
-        # run: |
-        #   brew update
-        #   brew install <required-packages>
-
-        # Example for Windows (adjust package names as needed):
-        # if: matrix.os == 'windows-latest'
-        # run: |
-        #   choco install <required-packages>
+      - name: Set up build environment for Windows
+        if: matrix.os == 'windows-latest'
+        # For Windows, you'll often need Visual Studio Build Tools, MSYS2, or Chocolatey
+        # This example uses Chocolatey for common tools. For full Firefox builds,
+        # you might need to install Visual Studio components more directly.
+        run: |
+          choco install -y git mercurial python3 nodejs
+          # For full Firefox builds, you'd also need the appropriate Visual Studio components
+          # You might use an action like 'microsoft/setup-msbuild@v1' or a self-hosted runner with VS installed
+          # Example: choco install -y visualstudio2019buildtools --package-parameters "--add Microsoft.VisualStudio.Component.VC.Tools.x64 --add Microsoft.VisualStudio.Component.Windows81SDK"
 
       - name: Make script executable (Linux/macOS)
         if: matrix.os != 'windows-latest'
@@ -49,11 +58,15 @@ jobs:
       - name: Create RPM package (if building on Linux)
         if: matrix.os == 'ubuntu-latest'
         run: |
-          # Add commands to create the RPM package here
-          # You might use tools like `rpmbuild`, `fpm`, or a dedicated GitHub Action
-          # Ensure your script produces the necessary files for RPM packaging (e.g., a spec file)
-          # Example using rpmbuild (adjust paths and file names):
-          # rpmbuild -ba --define "_topdir $(pwd)/rpmbuild" your-app.spec
+          # This is an example using 'fpm' (Effing Package Management), a versatile tool
+          # You'd need to install fpm first, e.g., 'gem install fpm' or use a Docker container
+          # For a real Firefox build, you'd usually leverage 'mozbuild' or 'mach package' commands
+          # assuming your build.sh produces the necessary artifacts for packaging.
+          # Example:
+          # sudo apt-get install -y ruby ruby-dev
+          # sudo gem install fpm
+          # fpm -s dir -t rpm -n arttulcat -v 1.0 -a noarch --description "Your Firefox-based browser" ./release_artifacts/arttulcat/=/usr/local/bin/arttulcat
+          echo "Placeholder for RPM creation. Implement with 'fpm' or 'rpmbuild' as needed."
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v2
@@ -81,8 +94,8 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            artifacts/arttulcat-build-ubuntu-latest/arttulcat.tar.gz  # Example paths
+            artifacts/arttulcat-build-ubuntu-latest/arttulcat.tar.gz
             artifacts/arttulcat-build-macos-latest/arttulcat.dmg
             artifacts/arttulcat-build-ubuntu-latest/arttulcat.deb
-            artifacts/arttulcat-build-ubuntu-latest/arttulcat.rpm  # RPM added
+            artifacts/arttulcat-build-ubuntu-latest/arttulcat.rpm
             artifacts/arttulcat-build-windows-latest/arttulcat.exe
