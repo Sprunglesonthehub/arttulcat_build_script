@@ -1,0 +1,106 @@
+name: Build and Release Arttulcat (Windows ONLY)
+
+on:
+  push:
+    branches:
+      - main # Automatically trigger on pushes to the 'main' branch
+  workflow_dispatch: # Allows manual triggering from GitHub UI
+
+# Grant permissions for the release job to create releases and tags
+permissions:
+  contents: write
+
+jobs:
+  build-windows: # Job for building Windows artifacts
+    name: Build on Windows (from Linux Runner)
+    runs-on: self-hosted # Changed to 'self-hosted' as requested
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Set up build environment for Ubuntu (for Windows cross-compilation)
+        run: |
+          sudo apt-get update
+          # Install general build dependencies for Ubuntu
+          sudo apt-get install -y \
+            build-essential curl git mercurial python3 python3-pip zip unzip npm \
+            autoconf2.13 libtool libffi-dev libdbus-1-dev libevent-dev libglib2.0-dev \
+            libssl-dev libncursesw5-dev wget
+
+          # IMPORTANT: For Windows cross-compilation, you will need MinGW-w64
+          # and potentially other Windows-specific development packages.
+          # The exact packages might vary based on your Arttulcat's specific dependencies.
+          sudo apt-get install -y mingw-w64
+          # You might also need to install specific Windows SDK headers or libraries
+          # if they are not covered by mingw-w64 or your build system expects them.
+
+      - name: Make build script executable
+        run: chmod +x ./build.sh # build.sh is assumed to be in the root of your repo
+
+      - name: Run Arttulcat build script (Windows cross-compilation)
+        shell: bash
+        run: |
+          # IMPORTANT: Building a Windows executable on a Linux machine (cross-compilation)
+          # is significantly more complex than native building.
+          # The current build.sh script using './mach package' is designed for
+          # native environments. For cross-compilation:
+          # 1. Your .mozconfig will need specific cross-compilation flags (e.g., --target=x86_64-pc-mingw32).
+          # 2. You will need a Windows SDK (or equivalent headers/libraries) and a
+          #    MinGW-w64 toolchain installed and configured on this Linux runner.
+          # 3. The `mach package` command might need to be adjusted or a custom
+          #    packaging script might be required to generate the final .exe or installer.
+          # Without these, './mach package' will likely fail when trying to build a Windows artifact.
+          ./build.sh
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: arttulcat-build-windows-latest # Consistent artifact name
+          # The .exe or installer is typically found in the 'dist' directory within the build object directory.
+          # Adjust this path if your build output differs for Windows.
+          # Example path: arttulcat_browser/obj-x86_64-pc-mingw32/dist/
+          path: arttulcat_browser/obj-x86_64-pc-mingw32/dist/ # Placeholder, adjust based on actual build output
+
+  release:
+    name: Create Release (Windows artifacts)
+    runs-on: ubuntu-latest
+    needs: build-windows # Depends on the successful completion of the Windows build job
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Download Windows build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: arttulcat-build-windows-latest # Download the specific Windows artifact
+          path: artifacts/arttulcat-build-windows-latest # Place it in a structured path
+
+      - name: List downloaded artifacts (for debugging)
+        run: |
+          echo "Listing contents of 'artifacts' directory:"
+          ls -R artifacts
+          echo "---"
+
+      - name: Create release
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ github.run_number }}
+          name: Arttulcat Release v${{ github.run_number }} (Windows)
+          draft: false
+          prerelease: false
+          # Attach the .exe or installer files from the downloaded artifacts
+          files: |
+            artifacts/arttulcat-build-windows-latest/*.exe
+            artifacts/arttulcat-build-windows-latest/*.msi # Include if you generate an MSI installer
