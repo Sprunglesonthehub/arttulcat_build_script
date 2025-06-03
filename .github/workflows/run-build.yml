@@ -29,7 +29,8 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11' # Using a specific, consistent Python version
-          cache: 'pip' # Enable caching for pip dependencies
+          # cache: 'pip' # Removed this line as per the error.
+                         # Re-enable or use cache-dependency-path if you have requirements.txt/pyproject.toml
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -58,10 +59,6 @@ jobs:
           # Ensure Xcode command line tools are installed (usually needed for Homebrew packages)
           xcode-select --install || true
           
-          # Homebrew is typically pre-installed on GitHub macOS runners.
-          # If it needed to be installed, its path would also need to be added.
-          # e.g. if ! command -v brew &> /dev/null; then ...install brew and add to GITHUB_PATH...; fi
-          
           brew update
           # python@3 and node are handled by setup-python and setup-node actions
           # openssl@1.1 might be required for specific C/C++ dependencies
@@ -69,9 +66,11 @@ jobs:
           brew install mercurial rust openssl@1.1
           # If openssl@1.1 needs to be found by build tools, you might need to set
           # environment variables like LDFLAGS and CPPFLAGS, or link it:
-          # For example: export LDFLAGS="-L$(brew --prefix openssl@1.1)/lib"
-          # export CPPFLAGS="-I$(brew --prefix openssl@1.1)/include"
-          # Or, if absolutely necessary: brew link --force openssl@1.1 (use with caution)
+          # For example (uncomment and adapt if needed):
+          # echo "LDFLAGS=-L$(brew --prefix openssl@1.1)/lib" >> $GITHUB_ENV
+          # echo "CPPFLAGS=-I$(brew --prefix openssl@1.1)/include" >> $GITHUB_ENV
+          # Or, if your build system supports it:
+          # export PKG_CONFIG_PATH="$(brew --prefix openssl@1.1)/lib/pkgconfig:$PKG_CONFIG_PATH"
 
       - name: Set up Git for Windows
         if: matrix.os == 'windows-latest'
