@@ -1,48 +1,85 @@
-name: Build and Release  # Name of your workflow
+name: Build and Release Arttulcat
 
 on:
-  workflow_dispatch:  # Allow manual trigger
+  workflow_dispatch:
 
 jobs:
-  build-and-release:
-    runs-on: ubuntu-latest  # Or your preferred runner environment
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2  # Checkout your repository
+        uses: actions/checkout@v2
 
-      - name: Make script executable
-        run: chmod +x ./build.sh  # Make build.sh executable
+      - name: Set up build environment for ${{ matrix.os }}
+        # Add steps here to install dependencies and tools specific to each OS
+        # This is crucial for a successful Firefox-based browser build
 
-      - name: Run build script
+        # Example for Ubuntu (adjust package names as needed for your build):
+        # if: matrix.os == 'ubuntu-latest'
+        # run: |
+        #   sudo apt-get update
+        #   sudo apt-get install -y <required-packages> build-essential fakeroot rpm
+
+        # Example for macOS (adjust package names as needed):
+        # if: matrix.os == 'macos-latest'
+        # run: |
+        #   brew update
+        #   brew install <required-packages>
+
+        # Example for Windows (adjust package names as needed):
+        # if: matrix.os == 'windows-latest'
+        # run: |
+        #   choco install <required-packages>
+
+      - name: Make script executable (Linux/macOS)
+        if: matrix.os != 'windows-latest'
+        run: chmod +x ./build.sh
+
+      - name: Run Arttulcat build script
         run: |
-          ./build.sh  # Execute the build.sh script
-          # Assuming your script produces output files,
-          # copy them to a specific location for release
-          # For example, if it generates a file named "output.tar.gz":
-          # cp output.tar.gz ./release_assets/
+          ./build.sh  # Your script should handle OS-specific builds
+
+      - name: Create RPM package (if building on Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          # Add commands to create the RPM package here
+          # You might use tools like `rpmbuild`, `fpm`, or a dedicated GitHub Action
+          # Ensure your script produces the necessary files for RPM packaging (e.g., a spec file)
+          # Example using rpmbuild (adjust paths and file names):
+          # rpmbuild -ba --define "_topdir $(pwd)/rpmbuild" your-app.spec
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v2
+        with:
+          name: arttulcat-build-${{ matrix.os }}
+          path: ./release_artifacts/  # Directory where your script places the built files
+
+  release:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v2
+        with:
+          path: artifacts
 
       - name: Create release
         id: create_release
-        uses: softprops/action-gh-release@v1  # Use a community action to create a release
+        uses: softprops/action-gh-release@v1
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Use the default GitHub token
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: v${{ github.run_number }}  # Example: Use the run number as the tag
-          name: Release ${{ github.run_number }}  # Example: Use the run number in the release name
-          draft: false  # Set to true if you want a draft release
-          prerelease: false # Set to true for a prerelease
-          # Add assets to the release (if your script produced output files)
-          # assets: |
-          #   ./release_assets/output.tar.gz
-
-      # Optionally, upload additional assets to the release
-      # - name: Upload Release Asset
-      #   uses: actions/upload-release-asset@v1
-      #   env:
-      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      #   with:
-      #     upload_url: ${{ steps.create_release.outputs.upload_url }}
-      #     asset_path: ./release_assets/another_asset.zip
-      #     asset_name: another_asset.zip
-      #     asset_content_type: application/zip
+          tag_name: v${{ github.run_number }}
+          name: Arttulcat Release ${{ github.run_number }}
+          draft: false
+          prerelease: false
+          files: |
+            artifacts/arttulcat-build-ubuntu-latest/arttulcat.tar.gz  # Example paths
+            artifacts/arttulcat-build-macos-latest/arttulcat.dmg
+            artifacts/arttulcat-build-ubuntu-latest/arttulcat.deb
+            artifacts/arttulcat-build-ubuntu-latest/arttulcat.rpm  # RPM added
+            artifacts/arttulcat-build-windows-latest/arttulcat.exe
