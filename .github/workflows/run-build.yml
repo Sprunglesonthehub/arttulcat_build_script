@@ -15,7 +15,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-13, windows-latest] # Changed macos-latest to macos-13 for amd64
+        os: [ubuntu-latest, macos-13, windows-latest] # macos-13 for amd64
         # You can add python-version and node-version to the matrix
         # if you need to test against or build with different versions.
         # python-version: ['3.9', '3.10', '3.11']
@@ -28,14 +28,14 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11' # Using a specific, consistent Python version
+          python-version: '3.11'
           # cache: 'pip' # Removed as project may not have requirements.txt/pyproject.toml at root
                          # Re-enable or use cache-dependency-path if you have these files.
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18' # Using a specific, consistent Node.js version
+          node-version: '18'
           # cache: 'npm' # Removed as project may not have package-lock.json etc. at root
                          # Re-enable or use cache-dependency-path if you have these files.
 
@@ -43,9 +43,6 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          # python3, python3-pip, npm are handled by setup-python and setup-node actions
-          # git and mercurial are explicitly installed on other OS, so keeping them here for consistency if build.sh needs them
-          # zip and unzip are kept as they might be used by the build script
           sudo apt-get install -y \
             build-essential curl git mercurial zip unzip \
             autoconf2.13 libtool libffi-dev libgdk-pixbuf2.0-dev libgtk-3-dev \
@@ -57,36 +54,26 @@ jobs:
       - name: Set up build environment for macOS (amd64)
         if: matrix.os == 'macos-13'
         run: |
-          # Ensure Xcode command line tools are installed (usually needed for Homebrew packages)
           xcode-select --install || true
-          
           brew update
-          # python@3 and node are handled by setup-python and setup-node actions
-          # openssl@1.1 might be required for specific C/C++ dependencies
-          # rust is a build dependency
           brew install mercurial rust openssl@1.1
-          # If openssl@1.1 needs to be found by build tools, you might need to set
-          # environment variables like LDFLAGS and CPPFLAGS, or link it:
-          # For example (uncomment and adapt if needed):
+          # Optional: If openssl@1.1 needs to be found by build tools, uncomment and adjust:
           # echo "LDFLAGS=-L$(brew --prefix openssl@1.1)/lib" >> $GITHUB_ENV
           # echo "CPPFLAGS=-I$(brew --prefix openssl@1.1)/include" >> $GITHUB_ENV
-          # Or, if your build system supports it:
-          # export PKG_CONFIG_PATH="$(brew --prefix openssl@1.1)/lib/pkgconfig:$PKG_CONFIG_PATH"
 
-      - name: Set up Git for Windows
+      - name: Set up Git for Windows (Scoop then Chocolatey)
         if: matrix.os == 'windows-latest'
-        shell: pwsh # Use PowerShell Core
+        shell: pwsh
         run: |
           Write-Host "Attempting to install Git..."
-          $scoopPath = Get-Command scoop -ErrorAction SilentlyContinue
-          if ($scoopPath) {
+          if (Get-Command scoop -ErrorAction SilentlyContinue) {
             Write-Host "Scoop is available. Attempting to install Git via Scoop."
             scoop install git
             if ($LASTEXITCODE -eq 0) {
               Write-Host "Git installed successfully via Scoop."
             } else {
               Write-Warning "Scoop install git failed (Exit Code: $LASTEXITCODE). Attempting with Chocolatey."
-              choco install -y git.install --skip-powershell # --skip-powershell can prevent unwanted profile modifications
+              choco install -y git.install --skip-powershell
               if ($LASTEXITCODE -ne 0) {
                   Write-Error "Chocolatey install git also failed (Exit Code: $LASTEXITCODE). Failing step."
                   exit 1
@@ -105,28 +92,89 @@ jobs:
           Write-Host "Verifying Git installation:"
           git --version
 
-      - name: Set up Mercurial for Windows
+      - name: Set up Mercurial for Windows (Scoop then MSI)
         if: matrix.os == 'windows-latest'
-        shell: pwsh # Use PowerShell Core
+        shell: pwsh
         run: |
-          Write-Host "Installing Mercurial via Chocolatey..."
-          choco install -y mercurial
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "Chocolatey install mercurial failed (Exit Code: $LASTEXITCODE). Failing step."
-            exit 1
+          Write-Host "Attempting to install Mercurial..."
+          $InstalledViaScoop = $false
+
+          # Try Scoop first
+          if (Get-Command scoop -ErrorAction SilentlyContinue) {
+              Write-Host "Scoop is available. Attempting to install Mercurial via Scoop."
+              scoop install mercurial
+              if ($LASTEXITCODE -eq 0) {
+                  Write-Host "Mercurial installed successfully via Scoop."
+                  $InstalledViaScoop = $true
+              } else {
+                  Write-Warning "Scoop install mercurial failed (Exit Code: $LASTEXITCODE). Will attempt MSI download."
+              }
+          } else {
+              Write-Host "Scoop not found. Will attempt MSI download for Mercurial."
           }
-          Write-Host "Mercurial installed successfully."
-          Write-Host "Verifying Mercurial installation:"
-          hg --version
-      # Python and Node.js for Windows are handled by the common setup-python and setup-node steps.
+
+          if (-not $InstalledViaScoop) {
+              # Fallback to MSI download and install
+              $MercurialVersion = "6.7.3" # Using a specific stable version for consistency. Update if needed.
+              $MsiFileName = "mercurial-${MercurialVersion}-x64.msi"
+              $MsiUrl = "https://www.mercurial-scm.org/release/windows/${MsiFileName}"
+              $TempDir = $env:TEMP
+              $MsiPath = Join-Path $TempDir $MsiFileName
+
+              try {
+                  Write-Host "Downloading Mercurial MSI from $MsiUrl to $MsiPath..."
+                  Invoke-WebRequest -Uri $MsiUrl -OutFile $MsiPath -UseBasicParsing
+                  Write-Host "Download complete. Installing Mercurial via MSI..."
+                  
+                  $msiArgs = "/i `"$MsiPath`" /qn /norestart ADDLOCAL=ALL"
+                  Write-Host "Running: msiexec $msiArgs"
+                  $process = Start-Process msiexec -ArgumentList $msiArgs -Wait -PassThru
+                  
+                  if ($process.ExitCode -ne 0 -and $process.ExitCode -ne 3010) { # 3010 is success, reboot required
+                      Write-Error "MSI installation failed with exit code $($process.ExitCode)."
+                      throw "MSI Installation Failed"
+                  }
+                  Write-Host "Mercurial MSI installation seems successful (Exit Code: $($process.ExitCode))."
+
+                  Write-Host "Refreshing PATH environment variable for current session..."
+                  $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+                  
+                  $MercurialProgFiles = "C:\Program Files\Mercurial"
+                  if (Test-Path "$MercurialProgFiles\hg.exe") {
+                      Write-Host "Adding $MercurialProgFiles to GITHUB_PATH for subsequent steps."
+                      echo "$MercurialProgFiles" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+                  } else {
+                      Write-Warning "Mercurial not found in $MercurialProgFiles after MSI install. Assuming MSI handled PATH correctly for new processes or it's elsewhere."
+                  }
+
+              } catch {
+                  Write-Error "An error occurred during Mercurial MSI download or installation: $($_.Exception.Message)"
+                  if (Test-Path $MsiPath) {
+                      Remove-Item $MsiPath -ErrorAction SilentlyContinue
+                  }
+                  exit 1
+              } finally {
+                  if (Test-Path $MsiPath) {
+                      Remove-Item $MsiPath -ErrorAction SilentlyContinue
+                  }
+              }
+          }
+
+          # Final verification
+          Write-Host "Verifying Mercurial installation..."
+          try {
+              hg --version
+              Write-Host "Mercurial is installed and accessible."
+          } catch {
+              Write-Error "Failed to run 'hg --version'. Mercurial installation may have failed or PATH is not correctly set up for the current session."
+              exit 1
+          }
 
       - name: Make build script executable (Linux/macOS)
         if: matrix.os != 'windows-latest'
         run: chmod +x ./build.sh
 
       - name: Run Arttulcat build script
-        # Use bash for all OS to ensure ./build.sh runs correctly.
-        # Git for Windows (installed in a previous step or by actions/checkout) provides bash.exe.
         shell: bash 
         run: |
           ./build.sh
@@ -135,21 +183,16 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: arttulcat-build-${{ matrix.os }}
-          path: ./release_artifacts/ # Ensure this directory and its contents are created by build.sh
+          path: ./release_artifacts/
 
   release:
     runs-on: ubuntu-latest
-    needs: build # This job depends on the successful completion of all 'build' matrix jobs
-    # Condition to ensure releases are only made on pushes to the 'main' branch,
-    # not on manual 'workflow_dispatch' triggers or pushes to other branches.
-    # Adjust or remove if manual triggers should also create releases.
+    needs: build
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Download all build artifacts
         uses: actions/download-artifact@v4
         with:
-          # No 'name' specified, so it downloads all artifacts produced by the 'build' job.
-          # Artifacts will be placed in subdirectories named after the artifact name.
           path: artifacts 
 
       - name: Create release
@@ -159,14 +202,12 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: v${{ github.run_number }}
-          name: Arttulcat Release v${{ github.run_number }} # More descriptive release name
+          name: Arttulcat Release v${{ github.run_number }}
           draft: false
           prerelease: false
           files: |
             artifacts/arttulcat-build-ubuntu-latest/arttulcat.tar.gz
-            artifacts/arttulcat-build-macos-13/arttulcat.dmg # Adjusted artifact name
+            artifacts/arttulcat-build-macos-13/arttulcat.dmg
             artifacts/arttulcat-build-ubuntu-latest/arttulcat.deb
             artifacts/arttulcat-build-ubuntu-latest/arttulcat.rpm
             artifacts/arttulcat-build-windows-latest/arttulcat.exe
-            # Add other expected artifact files here if any.
-            # Ensure these paths exactly match what's downloaded.
