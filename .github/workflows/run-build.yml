@@ -1,0 +1,48 @@
+name: Build and Release  # Name of your workflow
+
+on:
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest  # Or your preferred runner environment
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2  # Checkout your repository
+
+      - name: Make script executable
+        run: chmod +x ./build.sh  # Make build.sh executable
+
+      - name: Run build script
+        run: |
+          ./build.sh  # Execute the build.sh script
+          # Assuming your script produces output files,
+          # copy them to a specific location for release
+          # For example, if it generates a file named "output.tar.gz":
+          # cp output.tar.gz ./release_assets/
+
+      - name: Create release
+        id: create_release
+        uses: softprops/action-gh-release@v1  # Use a community action to create a release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Use the default GitHub token
+        with:
+          tag_name: v${{ github.run_number }}  # Example: Use the run number as the tag
+          name: Release ${{ github.run_number }}  # Example: Use the run number in the release name
+          draft: false  # Set to true if you want a draft release
+          prerelease: false # Set to true for a prerelease
+          # Add assets to the release (if your script produced output files)
+          # assets: |
+          #   ./release_assets/output.tar.gz
+
+      # Optionally, upload additional assets to the release
+      # - name: Upload Release Asset
+      #   uses: actions/upload-release-asset@v1
+      #   env:
+      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      #   with:
+      #     upload_url: ${{ steps.create_release.outputs.upload_url }}
+      #     asset_path: ./release_assets/another_asset.zip
+      #     asset_name: another_asset.zip
+      #     asset_content_type: application/zip
