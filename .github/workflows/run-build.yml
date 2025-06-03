@@ -92,45 +92,52 @@ jobs:
           Write-Host "Verifying Git installation:"
           git --version
 
-      - name: Set up Mercurial for Windows (via winget)
+      - name: Set up Mercurial for Windows (via pipx)
         if: matrix.os == 'windows-latest'
-        shell: pwsh
+        shell: pwsh # Using PowerShell for consistency, but commands are mostly cross-platform
         run: |
-          Write-Host "Attempting to install Mercurial via winget..."
-          # Ensure winget source is updated (good practice, though usually not strictly necessary on fresh runners)
-          winget source update --name winget
-          
-          # Install Mercurial. Mercurial.Mercurial is the ID.
-          # -e is equivalent to --exact for matching the ID.
-          # --accept-package-agreements and --accept-source-agreements are for non-interactive install.
-          # --source winget explicitly uses the default winget community repository.
-          Write-Host "Running: winget install --id Mercurial.Mercurial --exact --source winget --accept-package-agreements --accept-source-agreements"
-          winget install --id Mercurial.Mercurial --exact --source winget --accept-package-agreements --accept-source-agreements
-          
+          Write-Host "Installing pipx..."
+          python -m pip install --user pipx
           if ($LASTEXITCODE -ne 0) {
-              Write-Error "winget install Mercurial failed (Exit Code: $LASTEXITCODE). Failing step."
-              # You might want to try a search if install fails due to ID changes
-              # Write-Host "Attempting to search for Mercurial packages with winget..."
-              # winget search Mercurial
+              Write-Error "Failed to install pipx. (Exit Code: $LASTEXITCODE). Failing step."
               exit 1
           }
-          Write-Host "Mercurial installation via winget initiated successfully."
+          Write-Host "pipx installed."
 
-          # Winget usually adds to PATH, but changes might not be picked up by the current PS session immediately.
-          # For subsequent steps in the same job, especially if they are new processes (like a bash shell for build.sh),
-          # the PATH should be updated. We can try to force a refresh for the current session variables.
-          Write-Host "Refreshing PATH for current session..."
-          $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+          Write-Host "Ensuring pipx paths are configured..."
+          # On Windows, python -m pipx ensurepath might not update the current session's PATH immediately
+          # or affect GITHUB_PATH needed for subsequent steps. We'll manually find and add it.
+          # The default location for pipx binaries on Windows is %USERPROFILE%\.local\bin
+          $PipxBinPath = Join-Path $env:USERPROFILE ".local\bin"
+          Write-Host "Adding $PipxBinPath to GITHUB_PATH"
+          echo "$PipxBinPath" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          
+          # Also add to current session's PATH for immediate use if pipx command is called directly
+          $env:PATH = "$PipxBinPath;" + $env:PATH
+          Write-Host "Current PATH: $env:PATH"
+
+
+          Write-Host "Installing Mercurial via pipx..."
+          # Use the full path to pipx if it's not yet on PATH for this very first command
+          # However, after adding to GITHUB_PATH and current $env:PATH, just 'pipx' should work.
+          pipx install mercurial
+          if ($LASTEXITCODE -ne 0) {
+              Write-Error "pipx install mercurial failed (Exit Code: $LASTEXITCODE). Failing step."
+              # Try to get more info
+              pipx list
+              exit 1
+          }
+          Write-Host "Mercurial installation via pipx initiated successfully."
 
           # Verification
           Write-Host "Verifying Mercurial installation..."
           try {
               hg --version
-              Write-Host "Mercurial is installed and accessible."
+              Write-Host "Mercurial is installed and accessible via pipx."
           } catch {
-              Write-Error "Failed to run 'hg --version'. Mercurial installation may have failed or PATH is not correctly set up for the current session. Please check winget output."
-              # List common Mercurial install locations to help debug if PATH is an issue.
-              Write-Host "Common install locations for Mercurial: C:\Program Files\Mercurial or check user's AppData\Local\Programs\Mercurial"
+              Write-Error "Failed to run 'hg --version'. Mercurial (via pipx) installation may have failed or PATH is not correctly set up."
+              Write-Host "pipx bin path: $PipxBinPath"
+              Write-Host "Checking if hg.exe exists: $(Test-Path (Join-Path $PipxBinPath 'hg.exe'))"
               exit 1
           }
 
