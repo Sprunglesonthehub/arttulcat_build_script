@@ -92,81 +92,45 @@ jobs:
           Write-Host "Verifying Git installation:"
           git --version
 
-      - name: Set up Mercurial for Windows (Scoop then MSI)
+      - name: Set up Mercurial for Windows (via winget)
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
-          Write-Host "Attempting to install Mercurial..."
-          $InstalledViaScoop = $false
-
-          # Try Scoop first
-          if (Get-Command scoop -ErrorAction SilentlyContinue) {
-              Write-Host "Scoop is available. Attempting to install Mercurial via Scoop."
-              scoop install mercurial
-              if ($LASTEXITCODE -eq 0) {
-                  Write-Host "Mercurial installed successfully via Scoop."
-                  $InstalledViaScoop = $true
-              } else {
-                  Write-Warning "Scoop install mercurial failed (Exit Code: $LASTEXITCODE). Will attempt MSI download."
-              }
-          } else {
-              Write-Host "Scoop not found. Will attempt MSI download for Mercurial."
+          Write-Host "Attempting to install Mercurial via winget..."
+          # Ensure winget source is updated (good practice, though usually not strictly necessary on fresh runners)
+          winget source update --name winget
+          
+          # Install Mercurial. Mercurial.Mercurial is the ID.
+          # -e is equivalent to --exact for matching the ID.
+          # --accept-package-agreements and --accept-source-agreements are for non-interactive install.
+          # --source winget explicitly uses the default winget community repository.
+          Write-Host "Running: winget install --id Mercurial.Mercurial --exact --source winget --accept-package-agreements --accept-source-agreements"
+          winget install --id Mercurial.Mercurial --exact --source winget --accept-package-agreements --accept-source-agreements
+          
+          if ($LASTEXITCODE -ne 0) {
+              Write-Error "winget install Mercurial failed (Exit Code: $LASTEXITCODE). Failing step."
+              # You might want to try a search if install fails due to ID changes
+              # Write-Host "Attempting to search for Mercurial packages with winget..."
+              # winget search Mercurial
+              exit 1
           }
+          Write-Host "Mercurial installation via winget initiated successfully."
 
-          if (-not $InstalledViaScoop) {
-              # Fallback to MSI download and install
-              $MercurialVersion = "6.7.3" # Using a specific stable version for consistency. Update if needed.
-              $MsiFileName = "mercurial-${MercurialVersion}-x64.msi"
-              $MsiUrl = "https://www.mercurial-scm.org/release/windows/${MsiFileName}"
-              $TempDir = $env:TEMP
-              $MsiPath = Join-Path $TempDir $MsiFileName
+          # Winget usually adds to PATH, but changes might not be picked up by the current PS session immediately.
+          # For subsequent steps in the same job, especially if they are new processes (like a bash shell for build.sh),
+          # the PATH should be updated. We can try to force a refresh for the current session variables.
+          Write-Host "Refreshing PATH for current session..."
+          $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
 
-              try {
-                  Write-Host "Downloading Mercurial MSI from $MsiUrl to $MsiPath..."
-                  Invoke-WebRequest -Uri $MsiUrl -OutFile $MsiPath -UseBasicParsing
-                  Write-Host "Download complete. Installing Mercurial via MSI..."
-                  
-                  $msiArgs = "/i `"$MsiPath`" /qn /norestart ADDLOCAL=ALL"
-                  Write-Host "Running: msiexec $msiArgs"
-                  $process = Start-Process msiexec -ArgumentList $msiArgs -Wait -PassThru
-                  
-                  if ($process.ExitCode -ne 0 -and $process.ExitCode -ne 3010) { # 3010 is success, reboot required
-                      Write-Error "MSI installation failed with exit code $($process.ExitCode)."
-                      throw "MSI Installation Failed"
-                  }
-                  Write-Host "Mercurial MSI installation seems successful (Exit Code: $($process.ExitCode))."
-
-                  Write-Host "Refreshing PATH environment variable for current session..."
-                  $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-                  
-                  $MercurialProgFiles = "C:\Program Files\Mercurial"
-                  if (Test-Path "$MercurialProgFiles\hg.exe") {
-                      Write-Host "Adding $MercurialProgFiles to GITHUB_PATH for subsequent steps."
-                      echo "$MercurialProgFiles" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-                  } else {
-                      Write-Warning "Mercurial not found in $MercurialProgFiles after MSI install. Assuming MSI handled PATH correctly for new processes or it's elsewhere."
-                  }
-
-              } catch {
-                  Write-Error "An error occurred during Mercurial MSI download or installation: $($_.Exception.Message)"
-                  if (Test-Path $MsiPath) {
-                      Remove-Item $MsiPath -ErrorAction SilentlyContinue
-                  }
-                  exit 1
-              } finally {
-                  if (Test-Path $MsiPath) {
-                      Remove-Item $MsiPath -ErrorAction SilentlyContinue
-                  }
-              }
-          }
-
-          # Final verification
+          # Verification
           Write-Host "Verifying Mercurial installation..."
           try {
               hg --version
               Write-Host "Mercurial is installed and accessible."
           } catch {
-              Write-Error "Failed to run 'hg --version'. Mercurial installation may have failed or PATH is not correctly set up for the current session."
+              Write-Error "Failed to run 'hg --version'. Mercurial installation may have failed or PATH is not correctly set up for the current session. Please check winget output."
+              # List common Mercurial install locations to help debug if PATH is an issue.
+              Write-Host "Common install locations for Mercurial: C:\Program Files\Mercurial or check user's AppData\Local\Programs\Mercurial"
               exit 1
           }
 
