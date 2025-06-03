@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e # Exit immediately if a command exits with a non-zero status.
 
-echo "Starting Arttulcat build script..."
+echo "Starting Arttulcat build script (Linux ONLY)..."
 
 # The workflow's 'Checkout code' step already clones the repository
 # where this build.sh script resides.
@@ -24,117 +24,89 @@ rm -rf arttulcat_branding
 cd ../../ # Go back to the root of arttulcat_browser (which is now in the workspace)
 
 # Step 2: Clone configs repository and move .mozconfig
-echo "Cloning and moving .mozconfig..."
+echo "Cloning configs repository..."
 git clone https://github.com/Sprunglesonthehub/arttulcat_configs.git
+
+# --- START MODIFICATION for .mozconfig ---
+# This section assumes you might create platform-specific mozconfigs
+# For a Linux-only build, you might just ensure the one in arttulcat_configs/mozconfig/.mozconfig is Linux-compatible
+# or specifically copy a 'mozconfig.linux' if you adopt that strategy.
+
 cd arttulcat_configs/mozconfig
-mv .mozconfig ../../ # Move .mozconfig to the root of arttulcat_browser
+TARGET_MOZCONFIG_NAME=".mozconfig" # The name mach expects
+SOURCE_MOZCONFIG_FILE=""
+
+if [ -f "mozconfig.linux" ]; then
+    SOURCE_MOZCONFIG_FILE="mozconfig.linux"
+    echo "Found 'mozconfig.linux', using it."
+elif [ -f ".mozconfig" ]; then
+    SOURCE_MOZCONFIG_FILE=".mozconfig"
+    echo "Found generic '.mozconfig', using it. Ensure it's Linux-compatible."
+else
+    echo "Error: No suitable .mozconfig or mozconfig.linux found in arttulcat_configs/mozconfig/"
+    exit 1
+fi
+
+mv "$SOURCE_MOZCONFIG_FILE" "../../$TARGET_MOZCONFIG_NAME" # Move to arttulcat_browser root as .mozconfig
 cd ../../ # Go back to the root of arttulcat_browser
 rm -rf arttulcat_configs
+# --- END MODIFICATION for .mozconfig ---
+
 
 # Step 3: Set up build environment and build
 echo "Running mach bootstrap, clobber, and build..."
-./mach bootstrap
+./mach bootstrap # This must succeed. The '/msys/bin/sh' error happens here if .mozconfig is wrong.
 ./mach clobber
 ./mach build
 
-# Determine the platform for naming conventions
-PLATFORM=""
-case "$(uname -s)" in
-    Linux*)     PLATFORM="linux";;
-    Darwin*)    PLATFORM="macos";;
-    CYGWIN*|MINGW32*|MSYS*|MINGW*) PLATFORM="windows";;
-    *)          PLATFORM="unknown"
-esac
-
 # Create the release artifacts directory in the *original* workspace root
-# So, first go back to the original workspace root where the build.sh script is
-cd ..
+cd .. # Go back to the original workspace root where build.sh is
 
 mkdir -p release_artifacts
 
 # Find the build output directory (e.g., arttulcat_browser/obj-x86_64-pc-linux-gnu)
-# This finds the 'obj-*' directory directly within the cloned 'arttulcat_browser' directory
 BUILD_DIR=$(find arttulcat_browser -maxdepth 1 -type d -name "obj-*" | head -n 1)
 
 if [ -z "$BUILD_DIR" ]; then
     echo "Error: Could not find the build output directory (obj-*)."
     exit 1
 fi
-
 echo "Found build directory: $BUILD_DIR"
+DIST_DIR="$BUILD_DIR/dist"
 
-# Copy the final build artifact to release_artifacts with a standardized name
-# This part is CRITICAL and needs to be adjusted based on the actual output of your 'mach build'
-# For Firefox-based builds, 'mach package' or 'mach build installer' is often used to get final installers.
-# If 'mach build' just creates the browser directory, you might need to tar/zip it.
+echo "Packaging Linux artifacts..."
 
-case "$PLATFORM" in
-    linux)
-        # Assuming mach build creates a 'dist' directory with the browser executable/files
-        # and you want to tar.gz it. Or if it creates a .deb/.rpm directly.
-        if [ -d "$BUILD_DIR/dist/firefox" ]; then
-            echo "Packaging Linux build to arttulcat.tar.gz..."
-            tar -czf release_artifacts/arttulcat.tar.gz -C "$BUILD_DIR/dist" firefox/
-            # If your build produces .deb or .rpm, uncomment and adjust:
-            # cp "$BUILD_DIR/dist/arttulcat.deb" release_artifacts/arttulcat.deb || true
-            # cp "$BUILD_DIR/dist/arttulcat.rpm" release_artifacts/arttulcat.rpm || true
-        else
-            echo "Warning: Linux build output not found in expected locations ($BUILD_DIR/dist/firefox). Attempting generic copy of dist directory."
-            cp -r "$BUILD_DIR/dist/"* release_artifacts/ || true # Copy all, allow failure if empty
-        fi
-        ;;
-    macos)
-        if [ -d "$BUILD_DIR/dist/Firefox.app" ]; then
-            echo "Packaging macOS build to arttulcat.dmg..."
-            # Basic DMG creation. For a robust browser, consider a more advanced script or 'mach package'.
-            DMG_NAME="arttulcat.dmg"
-            APP_PATH="$BUILD_DIR/dist/Firefox.app"
-            TEMP_DMG="temp.dmg"
-            FINAL_DMG="release_artifacts/$DMG_NAME"
+# Package the main browser directory as tar.gz
+if [ -d "$DIST_DIR/firefox" ]; then
+    echo "Packaging Linux browser directory to arttulcat.tar.gz..."
+    tar -czf release_artifacts/arttulcat.tar.gz -C "$DIST_DIR" firefox/
+    echo "Created arttulcat.tar.gz"
+else
+    echo "Warning: Linux browser directory not found in $DIST_DIR/firefox for tar.gz packaging."
+fi
 
-            # Create a temporary disk image
-            hdiutil create -ov -fs HFS+ -volname "Arttulcat" -size 500m "$TEMP_DMG" # Increased size
-            # Mount the image
-            MOUNT_POINT=$(hdiutil attach "$TEMP_DMG" | grep -o '/Volumes/Arttulcat')
-            # Copy the app
-            cp -r "$APP_PATH" "$MOUNT_POINT/"
-            # Create a symlink to Applications (optional, common for DMGs)
-            ln -s /Applications "$MOUNT_POINT/Applications"
-            # Unmount
-            hdiutil detach "$MOUNT_POINT"
-            # Convert to a compressed, read-only DMG
-            hdiutil convert "$TEMP_DMG" -format UDRW -o "$FINAL_DMG"
-            rm "$TEMP_DMG"
-            echo "Created DMG at $FINAL_DMG"
-        else
-            echo "Warning: macOS .app bundle not found in expected locations ($BUILD_DIR/dist/Firefox.app). Attempting generic copy of dist directory."
-            cp -r "$BUILD_DIR/dist/"* release_artifacts/ || true # Copy all, allow failure if empty
-        fi
-        ;;
-    windows)
-        # Assuming mach build creates a 'dist' directory with the browser or an installer
-        if [ -d "$BUILD_DIR/dist/firefox" ]; then
-            echo "Packaging Windows build to arttulcat.zip..."
-            # Use 7zip for compression on Windows runners
-            # Ensure 7zip is available in PATH, or specify full path
-            /c/Program\ Files/7-Zip/7z.exe a release_artifacts/arttulcat.zip "$BUILD_DIR/dist/firefox/*"
-        elif [ -f "$BUILD_DIR/dist/arttulcat-installer.exe" ]; then # Example if mach creates an installer
-            echo "Copying Windows installer to arttulcat.exe..."
-            cp "$BUILD_DIR/dist/arttulcat-installer.exe" release_artifacts/arttulcat.exe
-        else
-            echo "Warning: Windows build output not found in expected locations. Attempting generic copy of dist directory."
-            cp -r "$BUILD_DIR/dist/"* release_artifacts/ || true # Copy all, allow failure if empty
-        fi
-        ;;
-    *)
-        echo "Unknown platform: $PLATFORM. Attempting generic copy of dist directory."
-        if [ -d "$BUILD_DIR/dist" ]; then
-            cp -r "$BUILD_DIR/dist/"* release_artifacts/ || true
-        else
-            echo "Error: Could not find '$BUILD_DIR/dist' for unknown platform. Manual intervention needed."
-            exit 1
-        fi
-        ;;
-esac
+# Copy .deb package if it exists
+DEB_FILE_PATTERN="$DIST_DIR/arttulcat*.deb" # Adjust pattern if necessary
+DEB_FILES=( $DEB_FILE_PATTERN )
+if [ -f "${DEB_FILES[0]}" ]; then
+    echo "Copying Linux .deb package(s) from $DIST_DIR..."
+    # Use cp with the pattern to copy all matching files
+    cp $DEB_FILE_PATTERN release_artifacts/
+    echo "Copied .deb package(s) to release_artifacts/"
+else
+    echo "Warning: No .deb package found matching '$DEB_FILE_PATTERN' in $DIST_DIR. Ensure ./mach build/package creates it."
+fi
 
-echo "Arttulcat build script finished."
+# Copy .rpm package if it exists
+RPM_FILE_PATTERN="$DIST_DIR/arttulcat*.rpm" # Adjust pattern if necessary
+RPM_FILES=( $RPM_FILE_PATTERN )
+if [ -f "${RPM_FILES[0]}" ]; then
+    echo "Copying Linux .rpm package(s) from $DIST_DIR..."
+    # Use cp with the pattern to copy all matching files
+    cp $RPM_FILE_PATTERN release_artifacts/
+    echo "Copied .rpm package(s) to release_artifacts/"
+else
+    echo "Warning: No .rpm package found matching '$RPM_FILE_PATTERN' in $DIST_DIR. Ensure ./mach build/package creates it."
+fi
+
+echo "Arttulcat build script (Linux ONLY) finished."
