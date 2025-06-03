@@ -13,7 +13,7 @@ permissions:
 jobs:
   build-linux: # Renamed job for clarity
     name: Build on Ubuntu (Linux)
-    runs-on: ubuntu-latest # Only run on ubuntu-latest
+    runs-on: arttulcatbuildmachinelinux # Self-Hosted Runner, to many resources for GitHub standard
 
     steps:
       - name: Checkout code
