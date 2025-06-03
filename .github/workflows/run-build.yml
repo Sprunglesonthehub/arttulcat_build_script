@@ -16,10 +16,6 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-13, windows-latest] # macos-13 for amd64
-        # You can add python-version and node-version to the matrix
-        # if you need to test against or build with different versions.
-        # python-version: ['3.9', '3.10', '3.11']
-        # node-version: ['16', '18', '20']
 
     steps:
       - name: Checkout code
@@ -29,37 +25,67 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          # cache: 'pip' # Removed as project may not have requirements.txt/pyproject.toml at root
-                         # Re-enable or use cache-dependency-path if you have these files.
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '18'
-          # cache: 'npm' # Removed as project may not have package-lock.json etc. at root
-                         # Re-enable or use cache-dependency-path if you have these files.
 
       - name: Set up build environment for Ubuntu
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            build-essential curl git mercurial zip unzip \
+            build-essential curl git mercurial python3 python3-pip zip unzip npm \
             autoconf2.13 libtool libffi-dev libgdk-pixbuf2.0-dev libgtk-3-dev \
             libdbus-1-dev libevent-dev libglib2.0-dev libssl-dev libx11-dev \
             libxcomposite-dev libxdamage-dev libxext-dev libxfixes-dev \
             libxrandr-dev libxtst-dev libxinerama-dev libncursesw5-dev \
-            libnotify-dev libasound2-dev libpulse-dev libcairo2-dev libpixman-1-dev yasm
+            libnotify-dev libasound2-dev libpulse-dev libcairo2-dev libpixman-1-dev yasm \
+            wget
 
       - name: Set up build environment for macOS (amd64)
         if: matrix.os == 'macos-13'
         run: |
           xcode-select --install || true
           brew update
-          brew install mercurial rust openssl@1.1
-          # Optional: If openssl@1.1 needs to be found by build tools, uncomment and adjust:
-          # echo "LDFLAGS=-L$(brew --prefix openssl@1.1)/lib" >> $GITHUB_ENV
-          # echo "CPPFLAGS=-I$(brew --prefix openssl@1.1)/include" >> $GITHUB_ENV
+          brew install mercurial git rust openssl@1.1 wget
+
+      # --- START OF WINDOWS MOZILLABUILD MANUAL SETUP ---
+      - name: Manually Download and Install MozillaBuild for Windows
+        if: matrix.os == 'windows-latest'
+        shell: pwsh # Use PowerShell for these Windows-specific commands
+        run: |
+          Write-Host "Setting up MozillaBuild manually..."
+          $MozBuildDir = "C:\mozilla-build" # Standard installation directory for MozillaBuild
+          
+          if (Test-Path $MozBuildDir) {
+            Write-Host "MozillaBuild directory already exists at $MozBuildDir. Skipping download and extraction."
+          } else {
+            Write-Host "MozillaBuild not found. Downloading MozillaBuild tools..."
+            # This URL points to MozillaBuild 3.4. You might need to update this URL in the future
+            # if a newer version is required by your Arttulcat's Firefox base.
+            # Check https://firefox-source-docs.mozilla.org/setup/windows_build.html for the latest.
+            $MozBuildUrl = "https://github.com/mozilla/mozilla-build/releases/download/3.4/mozilla-build-3.4.zip"
+            $MozBuildZip = Join-Path $env:TEMP "mozilla-build.zip" # Temporary path for the downloaded zip
+
+            Write-Host "Downloading from $MozBuildUrl to $MozBuildZip..."
+            Invoke-WebRequest -Uri $MozBuildUrl -OutFile $MozBuildZip -UseBasicParsing
+            
+            Write-Host "Extracting MozillaBuild to C:\ (it will create 'mozilla-build' folder)..."
+            # Expand-Archive extracts the contents of the zip. The mozilla-build.zip typically contains
+            # a 'mozilla-build' folder at its root.
+            Expand-Archive -Path $MozBuildZip -DestinationPath "C:\" -Force 
+            
+            Remove-Item $MozBuildZip -Force
+            Write-Host "MozillaBuild extracted successfully to $MozBuildDir."
+          }
+          
+          # Set the MOZILLABUILD environment variable for the current job.
+          # This is CRITICAL for 'mach' to find the MozillaBuild environment.
+          echo "MOZILLABUILD=$MozBuildDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "MOZILLABUILD environment variable set to '$MozBuildDir' for subsequent steps."
+      # --- END OF WINDOWS MOZILLABUILD MANUAL SETUP ---
 
       - name: Set up Git for Windows (Scoop then Chocolatey)
         if: matrix.os == 'windows-latest'
@@ -69,77 +95,50 @@ jobs:
           if (Get-Command scoop -ErrorAction SilentlyContinue) {
             Write-Host "Scoop is available. Attempting to install Git via Scoop."
             scoop install git
-            if ($LASTEXITCODE -eq 0) {
-              Write-Host "Git installed successfully via Scoop."
-            } else {
-              Write-Warning "Scoop install git failed (Exit Code: $LASTEXITCODE). Attempting with Chocolatey."
+            if ($LASTEXITCODE -eq 0) { Write-Host "Git installed successfully via Scoop." }
+            else {
+              Write-Warning "Scoop install git failed. Attempting with Chocolatey."
               choco install -y git.install --skip-powershell
-              if ($LASTEXITCODE -ne 0) {
-                  Write-Error "Chocolatey install git also failed (Exit Code: $LASTEXITCODE). Failing step."
-                  exit 1
-              }
+              if ($LASTEXITCODE -ne 0) { Write-Error "Choco install git also failed."; exit 1 }
               Write-Host "Git installed successfully via Chocolatey."
             }
           } else {
             Write-Host "Scoop not found. Installing Git via Chocolatey."
             choco install -y git.install --skip-powershell
-            if ($LASTEXITCODE -ne 0) {
-              Write-Error "Chocolatey install git failed (Exit Code: $LASTEXITCODE). Failing step."
-              exit 1
-            }
+            if ($LASTEXITCODE -ne 0) { Write-Error "Choco install git failed."; exit 1 }
             Write-Host "Git installed successfully via Chocolatey."
           }
-          Write-Host "Verifying Git installation:"
           git --version
 
-      - name: Set up Mercurial for Windows (via pipx)
+      - name: Set up Mercurial and other tools for Windows
         if: matrix.os == 'windows-latest'
-        shell: pwsh # Using PowerShell for consistency, but commands are mostly cross-platform
+        shell: pwsh
         run: |
           Write-Host "Installing pipx..."
           python -m pip install --user pipx
-          if ($LASTEXITCODE -ne 0) {
-              Write-Error "Failed to install pipx. (Exit Code: $LASTEXITCODE). Failing step."
-              exit 1
-          }
-          Write-Host "pipx installed."
-
-          Write-Host "Ensuring pipx paths are configured..."
-          # On Windows, python -m pipx ensurepath might not update the current session's PATH immediately
-          # or affect GITHUB_PATH needed for subsequent steps. We'll manually find and add it.
-          # The default location for pipx binaries on Windows is %USERPROFILE%\.local\bin
+          if ($LASTEXITCODE -ne 0) { Write-Error "Failed to install pipx."; exit 1 }
           $PipxBinPath = Join-Path $env:USERPROFILE ".local\bin"
-          Write-Host "Adding $PipxBinPath to GITHUB_PATH"
           echo "$PipxBinPath" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          
-          # Also add to current session's PATH for immediate use if pipx command is called directly
           $env:PATH = "$PipxBinPath;" + $env:PATH
-          Write-Host "Current PATH: $env:PATH"
-
-
+          
           Write-Host "Installing Mercurial via pipx..."
-          # Use the full path to pipx if it's not yet on PATH for this very first command
-          # However, after adding to GITHUB_PATH and current $env:PATH, just 'pipx' should work.
           pipx install mercurial
-          if ($LASTEXITCODE -ne 0) {
-              Write-Error "pipx install mercurial failed (Exit Code: $LASTEXITCODE). Failing step."
-              # Try to get more info
-              pipx list
-              exit 1
-          }
-          Write-Host "Mercurial installation via pipx initiated successfully."
+          if ($LASTEXITCODE -ne 0) { Write-Error "pipx install mercurial failed."; exit 1 }
+          hg --version
 
-          # Verification
-          Write-Host "Verifying Mercurial installation..."
-          try {
-              hg --version
-              Write-Host "Mercurial is installed and accessible via pipx."
-          } catch {
-              Write-Error "Failed to run 'hg --version'. Mercurial (via pipx) installation may have failed or PATH is not correctly set up."
-              Write-Host "pipx bin path: $PipxBinPath"
-              Write-Host "Checking if hg.exe exists: $(Test-Path (Join-Path $PipxBinPath 'hg.exe'))"
-              exit 1
+          Write-Host "Installing 7-Zip via Chocolatey..."
+          choco install -y 7zip.install
+          if ($LASTEXITCODE -ne 0) { Write-Error "choco install 7zip.install failed."; exit 1 }
+          $SevenZipPath1 = "C:\Program Files\7-Zip"
+          $SevenZipPath2 = "C:\Program Files (x86)\7-Zip"
+          if (Test-Path (Join-Path $SevenZipPath1 "7z.exe")) {
+            echo "$SevenZipPath1" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          } elseif (Test-Path (Join-Path $SevenZipPath2 "7z.exe")) {
+            echo "$SevenZipPath2" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           }
+
+          Write-Host "Installing wget via Chocolatey..."
+          choco install -y wget || Write-Warning "choco install wget failed. Continuing..."
 
       - name: Make build script executable (Linux/macOS)
         if: matrix.os != 'windows-latest'
@@ -147,7 +146,21 @@ jobs:
 
       - name: Run Arttulcat build script
         shell: bash 
+        env:
+          # MOZILLABUILD is set via GITHUB_ENV from the manual setup step for Windows
+          MOZILLABUILD: ${{ env.MOZILLABUILD }} 
         run: |
+          if [ "$RUNNER_OS" == "Windows" ]; then
+            echo "MOZILLABUILD environment variable in bash (Windows): $MOZILLABUILD"
+            # On Windows, mach commands are often run from within the MozillaBuild start shell,
+            # e.g., C:\mozilla-build\start-shell.bat
+            # Your build.sh will execute './mach bootstrap', which should now find MOZILLABUILD
+            # and operate within the context that MOZILLABUILD is available.
+            # If './mach bootstrap' itself needs to be run inside the MSYS shell provided by MozillaBuild,
+            # then build.sh might need to invoke `C:\mozilla-build\start-shell.bat -c "./mach bootstrap && ./mach clobber && ./mach build"`
+            # However, usually, setting MOZILLABUILD and having the tools on PATH (which MozillaBuild's start-shell.bat would do) is enough.
+            # Let's assume for now that ./mach is smart enough if MOZILLABUILD is set.
+          fi
           ./build.sh
 
       - name: Upload artifacts
@@ -166,6 +179,12 @@ jobs:
         with:
           path: artifacts 
 
+      - name: List downloaded artifacts (for debugging)
+        run: |
+          echo "Listing contents of 'artifacts' directory:"
+          ls -R artifacts
+          echo "---"
+
       - name: Create release
         id: create_release
         uses: softprops/action-gh-release@v1
@@ -178,7 +197,8 @@ jobs:
           prerelease: false
           files: |
             artifacts/arttulcat-build-ubuntu-latest/arttulcat.tar.gz
+            artifacts/arttulcat-build-ubuntu-latest/arttulcat*.deb
+            artifacts/arttulcat-build-ubuntu-latest/arttulcat*.rpm
             artifacts/arttulcat-build-macos-13/arttulcat.dmg
-            artifacts/arttulcat-build-ubuntu-latest/arttulcat.deb
-            artifacts/arttulcat-build-ubuntu-latest/arttulcat.rpm
             artifacts/arttulcat-build-windows-latest/arttulcat.exe
+            artifacts/arttulcat-build-windows-latest/arttulcat.zip
