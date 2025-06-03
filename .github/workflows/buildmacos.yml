@@ -15,7 +15,7 @@ permissions:
 jobs:
   build-macos: # Renamed job for clarity, targets macOS
     name: Build on macOS
-    runs-on: buildarttulcatformacos # Self-Hosted macOS Runner! THIS IS CRITICAL!
+    runs-on: self-hosted # Self-Hosted macOS Runner! THIS IS CRITICAL!
 
     steps:
       - name: Checkout code
