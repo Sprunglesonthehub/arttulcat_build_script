@@ -1,0 +1,85 @@
+# .github/workflows/run-build.yml (Modified for macOS build job)
+
+name: Build and Release Arttulcat (macOS ONLY)
+
+on:
+  push:
+    branches:
+      - main # Automatically trigger on pushes to the 'main' branch
+  workflow_dispatch: # Allows manual triggering from GitHub UI
+
+# Grant permissions for the release job to create releases and tags
+permissions:
+  contents: write
+
+jobs:
+  build-macos: # Renamed job for clarity, targets macOS
+    name: Build on macOS
+    runs-on: buildarttulcatformacos # Self-Hosted macOS Runner! THIS IS CRITICAL!
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      # No 'apt-get install' for macOS, as it uses Homebrew or pre-installed tools
+      # If you have specific macOS dependencies, you'd install them via Homebrew here:
+      # - name: Install macOS Dependencies
+      #   run: |
+      #     brew install mercurial # Example if needed
+      #     # etc.
+
+      - name: Make build script executable
+        run: chmod +x ./build.sh # build.sh is assumed to be in the root of your repo
+
+      - name: Run Arttulcat build script (macOS)
+        shell: bash
+        run: |
+          ./build.sh # This now runs the macOS-focused build.sh
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: arttulcat-build-macos # Consistent artifact name
+          path: ./release_artifacts/ # This directory is created by your build.sh
+
+  release:
+    name: Create Release (macOS artifacts)
+    runs-on: ubuntu-latest # You can still use an Ubuntu runner for the release job
+    needs: build-macos # Depends on the successful completion of the macOS build job
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Download macOS build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: arttulcat-build-macos # Download the specific macOS artifact
+          path: artifacts/arttulcat-build-macos # Place it in a structured path
+
+      - name: List downloaded artifacts (for debugging)
+        run: |
+          echo "Listing contents of 'artifacts' directory:"
+          ls -R artifacts
+          echo "---"
+
+      - name: Create release
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ github.run_number }}
+          name: Arttulcat Release v${{ github.run_number }} (macOS)
+          draft: false
+          prerelease: false
+          # Files from the macOS build
+          files: |
+            artifacts/arttulcat-build-macos/*.dmg # Assume the DMG is the primary artifact
