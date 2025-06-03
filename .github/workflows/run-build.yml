@@ -16,6 +16,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4 # Use v4 of the checkout action
+        # This checks out the repository where this workflow file resides.
+        # The 'build.sh' script will then clone 'arttulcat_browser' into this workspace.
 
       - name: Set up build environment for Ubuntu
         if: matrix.os == 'ubuntu-latest'
@@ -27,14 +29,10 @@ jobs:
       - name: Set up build environment for macOS
         if: matrix.os == 'macos-latest'
         run: |
-          # Install Xcode Command Line Tools
           xcode-select --install || true
-          # Install Homebrew if not present
           /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" || true
           brew update
-          # Install necessary build tools via Homebrew; customize as needed
           brew install mercurial python@3 node openssl@1.1 rust
-          # Ensure Python 3 is in PATH for builds that rely on 'python' command
           echo "/usr/local/opt/python@3/bin" >> $GITHUB_PATH
 
       - name: Set up build environment for Windows
@@ -45,25 +43,14 @@ jobs:
           # You might use choco to install general tools, but consider dedicated setup for VS.
           choco install -y git mercurial python3 nodejs
 
-      - name: Make script executable (Linux/macOS)
+      - name: Make build script executable (Linux/macOS)
         if: matrix.os != 'windows-latest'
         run: chmod +x ./build.sh
 
       - name: Run Arttulcat build script
         run: |
-          # Your 'build.sh' script should contain the actual build commands
-          # and output artifacts to the './release_artifacts/' directory.
+          # This script now contains all the cloning, moving, and mach commands.
           ./build.sh
-
-      - name: Create RPM package (if building on Linux)
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          # This is a placeholder. You'll need commands here to generate your RPM.
-          # Example: Install 'fpm' (Effing Package Management) and use it:
-          # sudo apt-get install -y ruby ruby-dev
-          # sudo gem install fpm
-          # fpm -s dir -t rpm -n arttulcat -v 1.0 -a noarch --description "Your Firefox-based browser" ./release_artifacts/arttulcat/=/usr/local/bin/arttulcat
-          echo "Placeholder for RPM creation on Linux. Implement your packaging logic here."
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4 # Use v4 of the upload-artifact action
