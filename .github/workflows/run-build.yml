@@ -6,64 +6,128 @@ on:
       - main # Automatically trigger on pushes to the 'main' branch
   workflow_dispatch: # Allows manual triggering from GitHub UI
 
+# Grant permissions for the release job to create releases and tags
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+        # You can add python-version and node-version to the matrix
+        # if you need to test against or build with different versions.
+        # python-version: ['3.9', '3.10', '3.11']
+        # node-version: ['16', '18', '20']
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4 # Use v4 of the checkout action
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11' # Using a specific, consistent Python version
+          cache: 'pip' # Enable caching for pip dependencies
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18' # Using a specific, consistent Node.js version
+          cache: 'npm' # Enable caching for npm dependencies
 
       - name: Set up build environment for Ubuntu
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential curl git mercurial python3 python3-pip zip unzip npm autoconf2.13 libtool libffi-dev libgdk-pixbuf2.0-dev libgtk-3-dev libdbus-1-dev libevent-dev libglib2.0-dev libssl-dev libx11-dev libxcomposite-dev libxdamage-dev libxext-dev libxfixes-dev libxrandr-dev libxtst-dev libxinerama-dev libncursesw5-dev libnotify-dev libasound2-dev libpulse-dev libcairo2-dev libpixman-1-dev yasm
+          # python3, python3-pip, npm are handled by setup-python and setup-node actions
+          # git and mercurial are explicitly installed on other OS, so keeping them here for consistency if build.sh needs them
+          # zip and unzip are kept as they might be used by the build script
+          sudo apt-get install -y \
+            build-essential curl git mercurial zip unzip \
+            autoconf2.13 libtool libffi-dev libgdk-pixbuf2.0-dev libgtk-3-dev \
+            libdbus-1-dev libevent-dev libglib2.0-dev libssl-dev libx11-dev \
+            libxcomposite-dev libxdamage-dev libxext-dev libxfixes-dev \
+            libxrandr-dev libxtst-dev libxinerama-dev libncursesw5-dev \
+            libnotify-dev libasound2-dev libpulse-dev libcairo2-dev libpixman-1-dev yasm
 
       - name: Set up build environment for macOS
         if: matrix.os == 'macos-latest'
         run: |
+          # Ensure Xcode command line tools are installed (usually needed for Homebrew packages)
           xcode-select --install || true
-          /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" || true
+          
+          # Homebrew is typically pre-installed on GitHub macOS runners.
+          # If it needed to be installed, its path would also need to be added.
+          # e.g. if ! command -v brew &> /dev/null; then ...install brew and add to GITHUB_PATH...; fi
+          
           brew update
-          brew install mercurial python@3 node openssl@1.1 rust
-          echo "/usr/local/opt/python@3/bin" >> $GITHUB_PATH
+          # python@3 and node are handled by setup-python and setup-node actions
+          # openssl@1.1 might be required for specific C/C++ dependencies
+          # rust is a build dependency
+          brew install mercurial rust openssl@1.1
+          # If openssl@1.1 needs to be found by build tools, you might need to set
+          # environment variables like LDFLAGS and CPPFLAGS, or link it:
+          # For example: export LDFLAGS="-L$(brew --prefix openssl@1.1)/lib"
+          # export CPPFLAGS="-I$(brew --prefix openssl@1.1)/include"
+          # Or, if absolutely necessary: brew link --force openssl@1.1 (use with caution)
 
-      # --- START OF REVISED WINDOWS SETUP ---
-      - name: Set up build environment for Windows (Part 1: Git via Scoop/Choco)
+      - name: Set up Git for Windows
         if: matrix.os == 'windows-latest'
-        shell: pwsh # Explicitly use PowerShell Core
+        shell: pwsh # Use PowerShell Core
         run: |
-          Write-Host "Installing Git via Scoop if available, else Chocolatey..."
-          if ((Get-Command scoop -ErrorAction SilentlyContinue) -and ($LASTEXITCODE -eq 0)) {
+          Write-Host "Attempting to install Git..."
+          $scoopPath = Get-Command scoop -ErrorAction SilentlyContinue
+          if ($scoopPath) {
+            Write-Host "Scoop is available. Attempting to install Git via Scoop."
             scoop install git
+            if ($LASTEXITCODE -eq 0) {
+              Write-Host "Git installed successfully via Scoop."
+            } else {
+              Write-Warning "Scoop install git failed (Exit Code: $LASTEXITCODE). Attempting with Chocolatey."
+              choco install -y git.install --skip-powershell # --skip-powershell can prevent unwanted profile modifications
+              if ($LASTEXITCODE -ne 0) {
+                  Write-Error "Chocolatey install git also failed (Exit Code: $LASTEXITCODE). Failing step."
+                  exit 1
+              }
+              Write-Host "Git installed successfully via Chocolatey."
+            }
           } else {
-            Write-Host "Scoop not found or failed, falling back to Chocolatey for Git."
-            choco install -y git.install
+            Write-Host "Scoop not found. Installing Git via Chocolatey."
+            choco install -y git.install --skip-powershell
+            if ($LASTEXITCODE -ne 0) {
+              Write-Error "Chocolatey install git failed (Exit Code: $LASTEXITCODE). Failing step."
+              exit 1
+            }
+            Write-Host "Git installed successfully via Chocolatey."
           }
+          Write-Host "Verifying Git installation:"
+          git --version
 
-      - name: Set up build environment for Windows (Part 2: Mercurial and Python)
+      - name: Set up Mercurial for Windows
         if: matrix.os == 'windows-latest'
-        shell: pwsh # Explicitly use PowerShell Core
+        shell: pwsh # Use PowerShell Core
         run: |
-          Write-Host "Installing Mercurial and Python 3 via Chocolatey..."
-          choco install -y mercurial python3
-
-      - name: Set up Node.js for Windows
-        if: matrix.os == 'windows-latest'
-        uses: actions/setup-node@v4 # Use the dedicated setup-node action
-        with:
-          node-version: '18' # Specify the Node.js version your build requires
-      # --- END OF REVISED WINDOWS SETUP ---
+          Write-Host "Installing Mercurial via Chocolatey..."
+          choco install -y mercurial
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Chocolatey install mercurial failed (Exit Code: $LASTEXITCODE). Failing step."
+            exit 1
+          }
+          Write-Host "Mercurial installed successfully."
+          Write-Host "Verifying Mercurial installation:"
+          hg --version
+      # Python and Node.js for Windows are handled by the common setup-python and setup-node steps.
 
       - name: Make build script executable (Linux/macOS)
         if: matrix.os != 'windows-latest'
         run: chmod +x ./build.sh
 
       - name: Run Arttulcat build script
+        # Use bash for all OS to ensure ./build.sh runs correctly.
+        # Git for Windows (installed in a previous step or by actions/checkout) provides bash.exe.
+        shell: bash 
         run: |
           ./build.sh
 
@@ -71,16 +135,22 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: arttulcat-build-${{ matrix.os }}
-          path: ./release_artifacts/
+          path: ./release_artifacts/ # Ensure this directory and its contents are created by build.sh
 
   release:
     runs-on: ubuntu-latest
-    needs: build
+    needs: build # This job depends on the successful completion of all 'build' matrix jobs
+    # Condition to ensure releases are only made on pushes to the 'main' branch,
+    # not on manual 'workflow_dispatch' triggers or pushes to other branches.
+    # Adjust or remove if manual triggers should also create releases.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
-      - name: Download artifacts
+      - name: Download all build artifacts
         uses: actions/download-artifact@v4
         with:
-          path: artifacts
+          # No 'name' specified, so it downloads all artifacts produced by the 'build' job.
+          # Artifacts will be placed in subdirectories named after the artifact name.
+          path: artifacts 
 
       - name: Create release
         id: create_release
@@ -89,7 +159,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: v${{ github.run_number }}
-          name: Arttulcat Release ${{ github.run_number }}
+          name: Arttulcat Release v${{ github.run_number }} # More descriptive release name
           draft: false
           prerelease: false
           files: |
@@ -98,3 +168,5 @@ jobs:
             artifacts/arttulcat-build-ubuntu-latest/arttulcat.deb
             artifacts/arttulcat-build-ubuntu-latest/arttulcat.rpm
             artifacts/arttulcat-build-windows-latest/arttulcat.exe
+            # Add other expected artifact files here if any.
+            # Ensure these paths exactly match what's downloaded.
